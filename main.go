@@ -87,7 +87,7 @@ func main() {
 	LambdaAccountId = registrationResponse.AccountId
 	LambdaFunctionVersion = registrationResponse.FunctionVersion
 	if err != nil {
-		util.Fatal(err)
+		util.Panic(err)
 	}
 
 	// If extension disabled, go into no op mode
@@ -102,10 +102,7 @@ func main() {
 	}
 
 	// Attempt to find the license key for telemetry sending
-	var timeout = 1 * time.Second
-	ctxLicenseKey, cancelLicenseKey := context.WithTimeout(ctx, timeout)
-	defer cancelLicenseKey()
-	licenseKey, err := credentials.GetNewRelicLicenseKey(ctxLicenseKey, conf)
+	licenseKey, err := credentials.GetNewRelicLicenseKey(ctx, conf)
 	if err != nil {
 		util.Logln("Failed to retrieve New Relic license key", err)
 		// We fail open; telemetry will go to CloudWatch instead
@@ -120,7 +117,7 @@ func main() {
 		if err2 != nil {
 			util.Logln(err2)
 		}
-		util.Fatal("Failed to start logs HTTP server", err)
+		util.Panic("Failed to start logs HTTP server", err)
 	}
 
 	eventTypes := []api.LogEventType{api.Platform}
@@ -137,7 +134,7 @@ func main() {
 		if err2 != nil {
 			util.Logln(err2)
 		}
-		util.Fatal("Failed to register with Logs API", err)
+		util.Panic("Failed to register with Logs API", err)
 	}
 
 	// Init the telemetry sending client
@@ -147,7 +144,7 @@ func main() {
 		if err2 != nil {
 			util.Logln(err2)
 		}
-		util.Fatal("telemetry pipe init failed: ", err)
+		util.Panic("telemetry pipe init failed: ", err)
 	}
 	// Set up the telemetry buffer
 	batch := telemetry.NewBatch(int64(conf.RipeMillis), int64(conf.RotMillis), conf.CollectTraceID)
