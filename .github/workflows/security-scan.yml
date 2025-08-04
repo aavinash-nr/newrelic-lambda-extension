@@ -48,6 +48,22 @@ jobs:
           severity: 'CRITICAL,HIGH,MEDIUM,LOW'
           scanners: 'vuln,secret,config'
 
+      - name: Run Trivy for detailed results
+        # Generate JSON for detailed vulnerability information
+        if: contains(fromJSON('["push", "pull_request"]'), github.event_name)
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # tag v0.28.0
+        continue-on-error: true
+        id: trivy_json
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'json'
+          output: 'trivy-results.json'
+          exit-code: '1'
+          ignore-unfixed: true
+          severity: 'CRITICAL,HIGH,MEDIUM,LOW'
+          scanners: 'vuln,secret,config'
+
       - name: Run Trivy vulnerability scanner in SARIF mode
         # Generate SARIF report for scheduled runs to upload to GitHub Security tab
         if: ${{ github.event_name == 'schedule' }}
@@ -92,16 +108,76 @@ jobs:
         continue-on-error: true
         with:
           script: |
+            const fs = require('fs');
             let comment = '## 🔒 Trivy Security Scan Results\n\n';
             
             // Check Trivy results based on step outcome
             const trivyTableResult = '${{ steps.trivy_table.outcome }}';
+            const trivyJsonResult = '${{ steps.trivy_json.outcome }}';
             const trivySarifResult = '${{ steps.trivy_sarif.outcome }}';
             
-            if (trivyTableResult === 'failure' || trivySarifResult === 'failure') {
-              comment += '⚠️ **Trivy Security Scanner detected vulnerabilities**\n';
-              comment += 'Please check the [Security tab](https://github.com/${{ github.repository }}/security/code-scanning) for detailed results.\n\n';
-              comment += '❌ **Trivy scan failed** - Please address the vulnerabilities found.\n\n';
+            if (trivyTableResult === 'failure' || trivyJsonResult === 'failure' || trivySarifResult === 'failure') {
+              comment += '⚠️ **Trivy Security Scanner detected vulnerabilities**\n\n';
+              
+              // Try to read detailed results from JSON output
+              try {
+                if (fs.existsSync('trivy-results.json')) {
+                  const jsonData = fs.readFileSync('trivy-results.json', 'utf8');
+                  const results = JSON.parse(jsonData);
+                  
+                  if (results.Results && results.Results.length > 0) {
+                    comment += '### 📋 Detailed Findings:\n\n';
+                    let criticalCount = 0, highCount = 0, mediumCount = 0, lowCount = 0;
+                    
+                    results.Results.forEach(result => {
+                      if (result.Vulnerabilities && result.Vulnerabilities.length > 0) {
+                        comment += `**📁 File/Package: \`${result.Target}\`**\n\n`;
+                        comment += '| CVE | Severity | Package | Installed | Fixed | Title |\n';
+                        comment += '|-----|----------|---------|-----------|-------|-------|\n';
+                        
+                        result.Vulnerabilities.slice(0, 10).forEach(vuln => {
+                          const severity = vuln.Severity || 'UNKNOWN';
+                          const cve = vuln.VulnerabilityID || 'N/A';
+                          const pkg = vuln.PkgName || 'N/A';
+                          const installed = vuln.InstalledVersion || 'N/A';
+                          const fixed = vuln.FixedVersion || 'Not Fixed';
+                          const title = (vuln.Title || '').substring(0, 50) + (vuln.Title && vuln.Title.length > 50 ? '...' : '');
+                          
+                          // Count by severity
+                          switch(severity) {
+                            case 'CRITICAL': criticalCount++; break;
+                            case 'HIGH': highCount++; break;
+                            case 'MEDIUM': mediumCount++; break;
+                            case 'LOW': lowCount++; break;
+                          }
+                          
+                          const severityEmoji = severity === 'CRITICAL' ? '🔴' : 
+                                               severity === 'HIGH' ? '🟠' : 
+                                               severity === 'MEDIUM' ? '🟡' : '🔵';
+                          
+                          comment += `| ${cve} | ${severityEmoji} ${severity} | ${pkg} | ${installed} | ${fixed} | ${title} |\n`;
+                        });
+                        
+                        if (result.Vulnerabilities.length > 10) {
+                          comment += `\n*... and ${result.Vulnerabilities.length - 10} more vulnerabilities*\n`;
+                        }
+                        comment += '\n';
+                      }
+                    });
+                    
+                    comment += `### 📊 Summary:\n`;
+                    comment += `- 🔴 **Critical**: ${criticalCount}\n`;
+                    comment += `- 🟠 **High**: ${highCount}\n`;
+                    comment += `- 🟡 **Medium**: ${mediumCount}\n`;
+                    comment += `- 🔵 **Low**: ${lowCount}\n\n`;
+                  }
+                }
+              } catch (error) {
+                comment += '*Could not parse detailed results. Check the logs for more information.*\n\n';
+              }
+              
+              comment += '❌ **Trivy scan failed** - Please address the vulnerabilities found above.\n\n';
+              comment += 'Please check the [Security tab](https://github.com/${{ github.repository }}/security/code-scanning) for complete details.\n\n';
             } else {
               comment += '✅ **Trivy Security Scanner**: No vulnerabilities detected\n\n';
               comment += '✅ **Trivy scan passed**\n\n';
@@ -117,7 +193,7 @@ jobs:
             });
 
       - name: Fail workflow if Trivy vulnerabilities found
-        if: ${{ (github.event_name == 'pull_request' || github.event_name == 'push') && (steps.trivy_table.outcome == 'failure' || steps.trivy_sarif.outcome == 'failure') }}
+        if: ${{ (github.event_name == 'pull_request' || github.event_name == 'push') && (steps.trivy_table.outcome == 'failure' || steps.trivy_json.outcome == 'failure' || steps.trivy_sarif.outcome == 'failure') }}
         run: |
           echo "❌ Trivy detected security vulnerabilities!"
           echo "Please review the security scan results above and address the vulnerabilities."
@@ -143,7 +219,9 @@ jobs:
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@latest
           echo "Running gosec security scan..."
-          if gosec -fmt sarif -out gosec-results.sarif ./...; then
+          
+          # Run gosec and capture both SARIF and JSON output
+          if gosec -fmt sarif -out gosec-results.sarif ./... && gosec -fmt json -out gosec-results.json ./...; then
             echo "gosec-result=success" >> $GITHUB_OUTPUT
             echo "Running gosec for console output..."
             gosec ./...
@@ -151,6 +229,9 @@ jobs:
             echo "gosec-result=failure" >> $GITHUB_OUTPUT
             echo "Running gosec for console output..."
             gosec ./...
+            # Still generate outputs for analysis
+            gosec -fmt sarif -out gosec-results.sarif ./... || true
+            gosec -fmt json -out gosec-results.json ./... || true
             exit 1
           fi
 
@@ -167,14 +248,63 @@ jobs:
         continue-on-error: true
         with:
           script: |
+            const fs = require('fs');
             let comment = '## 🔒 gosec Security Scan Results\n\n';
             
             // Check gosec results based on step outcome
             const gosecResult = '${{ steps.gosec_scan.outcome }}';
             if (gosecResult === 'failure') {
-              comment += '⚠️ **gosec Security Scanner detected issues**\n';
-              comment += 'Please check the [Security tab](https://github.com/${{ github.repository }}/security/code-scanning) for detailed results.\n\n';
-              comment += '❌ **gosec scan failed** - Please address the issues found.\n\n';
+              comment += '⚠️ **gosec Security Scanner detected issues**\n\n';
+              
+              // Try to read detailed results from JSON output
+              try {
+                if (fs.existsSync('gosec-results.json')) {
+                  const jsonData = fs.readFileSync('gosec-results.json', 'utf8');
+                  const results = JSON.parse(jsonData);
+                  
+                  if (results.Issues && results.Issues.length > 0) {
+                    comment += '### 📋 Detailed Findings:\n\n';
+                    let highCount = 0, mediumCount = 0, lowCount = 0;
+                    
+                    comment += '| Rule ID | Severity | File | Line | Description |\n';
+                    comment += '|---------|----------|------|------|-------------|\n';
+                    
+                    results.Issues.slice(0, 15).forEach(issue => {
+                      const ruleId = issue.rule_id || 'N/A';
+                      const severity = issue.severity || 'UNKNOWN';
+                      const file = issue.file ? issue.file.split('/').pop() : 'N/A';
+                      const line = issue.line || 'N/A';
+                      const details = (issue.details || '').substring(0, 60) + (issue.details && issue.details.length > 60 ? '...' : '');
+                      
+                      // Count by severity
+                      switch(severity.toUpperCase()) {
+                        case 'HIGH': highCount++; break;
+                        case 'MEDIUM': mediumCount++; break;
+                        case 'LOW': lowCount++; break;
+                      }
+                      
+                      const severityEmoji = severity.toUpperCase() === 'HIGH' ? '🟠' : 
+                                           severity.toUpperCase() === 'MEDIUM' ? '🟡' : '🔵';
+                      
+                      comment += `| ${ruleId} | ${severityEmoji} ${severity.toUpperCase()} | \`${file}\` | ${line} | ${details} |\n`;
+                    });
+                    
+                    if (results.Issues.length > 15) {
+                      comment += `\n*... and ${results.Issues.length - 15} more issues*\n`;
+                    }
+                    
+                    comment += `\n### 📊 Summary:\n`;
+                    comment += `- 🟠 **High**: ${highCount}\n`;
+                    comment += `- 🟡 **Medium**: ${mediumCount}\n`;
+                    comment += `- 🔵 **Low**: ${lowCount}\n\n`;
+                  }
+                }
+              } catch (error) {
+                comment += '*Could not parse detailed results. Check the logs for more information.*\n\n';
+              }
+              
+              comment += '❌ **gosec scan failed** - Please address the issues found above.\n\n';
+              comment += 'Please check the [Security tab](https://github.com/${{ github.repository }}/security/code-scanning) for complete details.\n\n';
             } else if (gosecResult === 'success') {
               comment += '✅ **gosec Security Scanner**: No issues detected\n\n';
               comment += '✅ **gosec scan passed**\n\n';
