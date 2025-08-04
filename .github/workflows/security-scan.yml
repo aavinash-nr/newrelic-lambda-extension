@@ -38,11 +38,12 @@ jobs:
         if: contains(fromJSON('["push", "pull_request"]'), github.event_name)
         uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # tag v0.28.0
         continue-on-error: true
+        id: trivy_table
         with:
           scan-type: 'fs'
           scan-ref: '.'
           format: 'table'
-          exit-code: '0'
+          exit-code: '1'
           ignore-unfixed: true
           severity: 'CRITICAL,HIGH,MEDIUM,LOW'
           scanners: 'vuln,secret,config'
@@ -66,11 +67,13 @@ jobs:
         if: github.event_name == 'pull_request'
         uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # tag v0.28.0
         continue-on-error: true
+        id: trivy_sarif
         with:
           scan-type: 'fs'
           scan-ref: '.'
           format: 'sarif'
           output: 'trivy-results.sarif'
+          exit-code: '1'
           ignore-unfixed: true
           severity: 'CRITICAL,HIGH,MEDIUM,LOW'
           scanners: 'vuln,secret,config'
@@ -82,6 +85,43 @@ jobs:
         continue-on-error: true
         with:
           sarif_file: 'trivy-results.sarif'
+
+      - name: Comment on PR with Trivy results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        continue-on-error: true
+        with:
+          script: |
+            let comment = '## 🔒 Trivy Security Scan Results\n\n';
+            
+            // Check Trivy results based on step outcome
+            const trivyTableResult = '${{ steps.trivy_table.outcome }}';
+            const trivySarifResult = '${{ steps.trivy_sarif.outcome }}';
+            
+            if (trivyTableResult === 'failure' || trivySarifResult === 'failure') {
+              comment += '⚠️ **Trivy Security Scanner detected vulnerabilities**\n';
+              comment += 'Please check the [Security tab](https://github.com/${{ github.repository }}/security/code-scanning) for detailed results.\n\n';
+              comment += '❌ **Trivy scan failed** - Please address the vulnerabilities found.\n\n';
+            } else {
+              comment += '✅ **Trivy Security Scanner**: No vulnerabilities detected\n\n';
+              comment += '✅ **Trivy scan passed**\n\n';
+            }
+            
+            comment += 'View the complete security scan logs in the [Actions tab](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}).';
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Fail workflow if Trivy vulnerabilities found
+        if: ${{ (github.event_name == 'pull_request' || github.event_name == 'push') && (steps.trivy_table.outcome == 'failure' || steps.trivy_sarif.outcome == 'failure') }}
+        run: |
+          echo "❌ Trivy detected security vulnerabilities!"
+          echo "Please review the security scan results above and address the vulnerabilities."
+          exit 1
 
   go-security-scan:
     name: Go Security Scan
@@ -99,12 +139,20 @@ jobs:
 
       - name: Run gosec Security Scanner
         continue-on-error: true
+        id: gosec_scan
         run: |
           go install github.com/securego/gosec/v2/cmd/gosec@latest
           echo "Running gosec security scan..."
-          gosec -fmt sarif -out gosec-results.sarif ./...
-          echo "Running gosec for console output..."
-          gosec ./...
+          if gosec -fmt sarif -out gosec-results.sarif ./...; then
+            echo "gosec-result=success" >> $GITHUB_OUTPUT
+            echo "Running gosec for console output..."
+            gosec ./...
+          else
+            echo "gosec-result=failure" >> $GITHUB_OUTPUT
+            echo "Running gosec for console output..."
+            gosec ./...
+            exit 1
+          fi
 
       - name: Upload gosec scan results to GitHub Security tab
         if: ${{ github.event_name == 'schedule' || github.event_name == 'pull_request' }}
@@ -113,47 +161,23 @@ jobs:
         with:
           sarif_file: 'gosec-results.sarif'
 
-      - name: Fail if vulnerabilities found
-        if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
-        run: |
-          echo "Security scan completed. Check the logs above for any vulnerabilities found."
-          if [ -f "trivy-results.sarif" ] && [ -s "trivy-results.sarif" ]; then
-            echo "Trivy found security issues. Please review the scan results."
-          fi
-          if [ -f "gosec-results.sarif" ] && [ -s "gosec-results.sarif" ]; then
-            echo "Gosec found security issues. Please review the scan results."
-          fi
-          echo "Please check the Security tab in GitHub for detailed results."
-
-      - name: Comment on PR with security scan results
+      - name: Comment on PR with gosec results
         if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         continue-on-error: true
         with:
           script: |
-            const fs = require('fs');
-            let comment = '## 🔒 Security Scan Results\n\n';
+            let comment = '## 🔒 gosec Security Scan Results\n\n';
             
-            // Check if Trivy found issues
-            if (fs.existsSync('trivy-results.sarif')) {
-              const trivyResults = fs.readFileSync('trivy-results.sarif', 'utf8');
-              if (trivyResults.trim()) {
-                comment += '⚠️ **Trivy Security Scanner detected vulnerabilities**\n';
-                comment += 'Please check the [Security tab](https://github.com/${{ github.repository }}/security/code-scanning) for detailed results.\n\n';
-              } else {
-                comment += '✅ **Trivy Security Scanner**: No vulnerabilities detected\n\n';
-              }
-            }
-            
-            // Check if gosec found issues
-            if (fs.existsSync('gosec-results.sarif')) {
-              const gosecResults = fs.readFileSync('gosec-results.sarif', 'utf8');
-              if (gosecResults.trim()) {
-                comment += '⚠️ **gosec Security Scanner detected issues**\n';
-                comment += 'Please check the [Security tab](https://github.com/${{ github.repository }}/security/code-scanning) for detailed results.\n\n';
-              } else {
-                comment += '✅ **gosec Security Scanner**: No issues detected\n\n';
-              }
+            // Check gosec results based on step outcome
+            const gosecResult = '${{ steps.gosec_scan.outcome }}';
+            if (gosecResult === 'failure') {
+              comment += '⚠️ **gosec Security Scanner detected issues**\n';
+              comment += 'Please check the [Security tab](https://github.com/${{ github.repository }}/security/code-scanning) for detailed results.\n\n';
+              comment += '❌ **gosec scan failed** - Please address the issues found.\n\n';
+            } else if (gosecResult === 'success') {
+              comment += '✅ **gosec Security Scanner**: No issues detected\n\n';
+              comment += '✅ **gosec scan passed**\n\n';
             }
             
             comment += 'View the complete security scan logs in the [Actions tab](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}).';
@@ -164,3 +188,10 @@ jobs:
               repo: context.repo.repo,
               body: comment
             });
+
+      - name: Fail workflow if gosec vulnerabilities found
+        if: ${{ (github.event_name == 'pull_request' || github.event_name == 'push') && steps.gosec_scan.outcome == 'failure' }}
+        run: |
+          echo "❌ gosec detected security issues!"
+          echo "Please review the security scan results above and address the issues."
+          exit 1
