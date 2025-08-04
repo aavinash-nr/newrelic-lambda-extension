@@ -49,6 +49,7 @@ jobs:
           ignore-unfixed: true
           severity: 'CRITICAL,HIGH,MEDIUM,LOW'
           scanners: 'vuln,secret,config'
+          skip-dirs: 'examples'
 
       - name: Run Trivy for detailed results
         # Generate JSON for detailed vulnerability information
@@ -65,6 +66,7 @@ jobs:
           ignore-unfixed: true
           severity: 'CRITICAL,HIGH,MEDIUM,LOW'
           scanners: 'vuln,secret,config'
+          skip-dirs: 'examples'
 
       - name: Run Trivy vulnerability scanner in SARIF mode
         # Generate SARIF report for scheduled runs to upload to GitHub Security tab
@@ -79,6 +81,7 @@ jobs:
           ignore-unfixed: true
           severity: 'CRITICAL,HIGH,MEDIUM,LOW'
           scanners: 'vuln,secret,config'
+          skip-dirs: 'examples'
 
       - name: Run Trivy for PR comment
         # Generate SARIF for PR comments when vulnerabilities are found
@@ -95,6 +98,7 @@ jobs:
           ignore-unfixed: true
           severity: 'CRITICAL,HIGH,MEDIUM,LOW'
           scanners: 'vuln,secret,config'
+          skip-dirs: 'examples'
 
       - name: Upload Trivy scan results to GitHub Security tab
         # Upload SARIF when running scheduled scans or PR scans
