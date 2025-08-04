@@ -16,6 +16,8 @@ jobs:
     permissions:
       security-events: write
       contents: read
+      issues: write
+      pull-requests: write
     steps:
       - name: Checkout code
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # tag v4.1.7
@@ -116,6 +118,8 @@ jobs:
             const trivyJsonResult = '${{ steps.trivy_json.outcome }}';
             const trivySarifResult = '${{ steps.trivy_sarif.outcome }}';
             
+            console.log('Trivy step outcomes:', { trivyTableResult, trivyJsonResult, trivySarifResult });
+            
             if (trivyTableResult === 'failure' || trivyJsonResult === 'failure' || trivySarifResult === 'failure') {
               comment += '⚠️ **Trivy Security Scanner detected vulnerabilities**\n\n';
               
@@ -123,6 +127,7 @@ jobs:
               try {
                 if (fs.existsSync('trivy-results.json')) {
                   const jsonData = fs.readFileSync('trivy-results.json', 'utf8');
+                  console.log('Trivy JSON data length:', jsonData.length);
                   const results = JSON.parse(jsonData);
                   
                   if (results.Results && results.Results.length > 0) {
@@ -166,14 +171,21 @@ jobs:
                     });
                     
                     comment += `### 📊 Summary:\n`;
-                    comment += `- 🔴 **Critical**: ${criticalCount}\n`;
-                    comment += `- 🟠 **High**: ${highCount}\n`;
-                    comment += `- 🟡 **Medium**: ${mediumCount}\n`;
-                    comment += `- 🔵 **Low**: ${lowCount}\n\n`;
+                    if (criticalCount > 0) comment += `- 🔴 **Critical**: ${criticalCount}\n`;
+                    if (highCount > 0) comment += `- 🟠 **High**: ${highCount}\n`;
+                    if (mediumCount > 0) comment += `- 🟡 **Medium**: ${mediumCount}\n`;
+                    if (lowCount > 0) comment += `- 🔵 **Low**: ${lowCount}\n`;
+                    comment += '\n';
+                  } else {
+                    comment += '*No vulnerabilities found in detailed results.*\n\n';
                   }
+                } else {
+                  comment += '*trivy-results.json file not found.*\n\n';
+                  console.log('Trivy JSON file does not exist');
                 }
               } catch (error) {
-                comment += '*Could not parse detailed results. Check the logs for more information.*\n\n';
+                comment += `*Could not parse detailed results: ${error.message}*\n\n`;
+                console.log('Error parsing Trivy JSON:', error.message);
               }
               
               comment += '❌ **Trivy scan failed** - Please address the vulnerabilities found above.\n\n';
@@ -202,6 +214,11 @@ jobs:
   go-security-scan:
     name: Go Security Scan
     runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+      issues: write
+      pull-requests: write
     steps:
       - name: Checkout code
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # tag v4.1.7
@@ -220,18 +237,17 @@ jobs:
           go install github.com/securego/gosec/v2/cmd/gosec@latest
           echo "Running gosec security scan..."
           
-          # Run gosec and capture both SARIF and JSON output
-          if gosec -fmt sarif -out gosec-results.sarif ./... && gosec -fmt json -out gosec-results.json ./...; then
+          # Always generate outputs first
+          gosec -fmt sarif -out gosec-results.sarif ./... || true
+          gosec -fmt json -out gosec-results.json ./... || true
+          
+          # Run gosec and check for issues
+          if gosec ./...; then
             echo "gosec-result=success" >> $GITHUB_OUTPUT
-            echo "Running gosec for console output..."
-            gosec ./...
+            echo "✅ No security issues found by gosec"
           else
             echo "gosec-result=failure" >> $GITHUB_OUTPUT
-            echo "Running gosec for console output..."
-            gosec ./...
-            # Still generate outputs for analysis
-            gosec -fmt sarif -out gosec-results.sarif ./... || true
-            gosec -fmt json -out gosec-results.json ./... || true
+            echo "⚠️ Security issues found by gosec"
             exit 1
           fi
 
@@ -264,7 +280,7 @@ jobs:
                   
                   if (results.Issues && results.Issues.length > 0) {
                     comment += '### 📋 Detailed Findings:\n\n';
-                    let highCount = 0, mediumCount = 0, lowCount = 0;
+                    let criticalCount = 0, highCount = 0, mediumCount = 0, lowCount = 0;
                     
                     comment += '| Rule ID | Severity | File | Line | Description |\n';
                     comment += '|---------|----------|------|------|-------------|\n';
@@ -278,12 +294,14 @@ jobs:
                       
                       // Count by severity
                       switch(severity.toUpperCase()) {
+                        case 'CRITICAL': criticalCount++; break;
                         case 'HIGH': highCount++; break;
                         case 'MEDIUM': mediumCount++; break;
                         case 'LOW': lowCount++; break;
                       }
                       
-                      const severityEmoji = severity.toUpperCase() === 'HIGH' ? '🟠' : 
+                      const severityEmoji = severity.toUpperCase() === 'CRITICAL' ? '🔴' :
+                                           severity.toUpperCase() === 'HIGH' ? '🟠' : 
                                            severity.toUpperCase() === 'MEDIUM' ? '🟡' : '🔵';
                       
                       comment += `| ${ruleId} | ${severityEmoji} ${severity.toUpperCase()} | \`${file}\` | ${line} | ${details} |\n`;
@@ -294,13 +312,19 @@ jobs:
                     }
                     
                     comment += `\n### 📊 Summary:\n`;
-                    comment += `- 🟠 **High**: ${highCount}\n`;
-                    comment += `- 🟡 **Medium**: ${mediumCount}\n`;
-                    comment += `- 🔵 **Low**: ${lowCount}\n\n`;
+                    if (criticalCount > 0) comment += `- � **Critical**: ${criticalCount}\n`;
+                    if (highCount > 0) comment += `- �🟠 **High**: ${highCount}\n`;
+                    if (mediumCount > 0) comment += `- 🟡 **Medium**: ${mediumCount}\n`;
+                    if (lowCount > 0) comment += `- 🔵 **Low**: ${lowCount}\n`;
+                    comment += '\n';
+                  } else {
+                    comment += '*No detailed issues found in JSON output.*\n\n';
                   }
+                } else {
+                  comment += '*gosec-results.json file not found.*\n\n';
                 }
               } catch (error) {
-                comment += '*Could not parse detailed results. Check the logs for more information.*\n\n';
+                comment += `*Could not parse detailed results: ${error.message}*\n\n`;
               }
               
               comment += '❌ **gosec scan failed** - Please address the issues found above.\n\n';
@@ -308,6 +332,8 @@ jobs:
             } else if (gosecResult === 'success') {
               comment += '✅ **gosec Security Scanner**: No issues detected\n\n';
               comment += '✅ **gosec scan passed**\n\n';
+            } else {
+              comment += '🔄 **gosec Security Scanner**: Scan completed with unknown status\n\n';
             }
             
             comment += 'View the complete security scan logs in the [Actions tab](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}).';
