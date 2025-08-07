@@ -73,7 +73,7 @@ func decodeUncompress(input string) ([]byte, error) {
 	limitedReader := &io.LimitedReader{R: gz, N: 10 << 20} // 10MB
 	_, err = io.Copy(&out, limitedReader)
 	if err != nil {
-		gz.Close()
+		_ = gz.Close() // Best effort close on error
 		return nil, err
 	}
 	err = gz.Close()
