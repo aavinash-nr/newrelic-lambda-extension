@@ -224,7 +224,7 @@ func compress(b []byte, gzipWriterPool *sync.Pool) (*bytes.Buffer, error) {
 	w.Reset(&buf)
 	_, err := w.Write(b)
 	if err != nil {
-		w.Close() // Best effort close on write error
+		_ = w.Close() // Best effort close on write error, ignore close error
 		return nil, err
 	}
 	
