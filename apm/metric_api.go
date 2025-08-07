@@ -220,6 +220,7 @@ func SendMetrics(apiKey string, metricEndpointOverride string, metrics []Metric,
 	allowInsecure := skipTLSVerify && os.Getenv("NEW_RELIC_ALLOW_INSECURE_TLS") == "true"
 	
 	tr := &http.Transport{
+		// #nosec G402 - TLS verification can only be disabled with explicit environment variable
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: allowInsecure},
 	}
 	client := &http.Client{Transport: tr}

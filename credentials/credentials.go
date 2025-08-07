@@ -38,6 +38,7 @@ var (
 
 const (
 	// DefaultSecretName is the default name for the New Relic license key in AWS Secrets Manager
+	// #nosec G101 - This is a configuration constant, not a hardcoded credential
 	DefaultSecretName = "NEW_RELIC_LICENSE_KEY"
 )
 

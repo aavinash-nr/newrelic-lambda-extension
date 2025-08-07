@@ -3,6 +3,8 @@ package apm
 import (
 	"crypto/rand"
 	"sync"
+
+	"github.com/newrelic/newrelic-lambda-extension/util"
 )
 
 // TraceIDGenerator creates identifiers for distributed tracing.
@@ -23,7 +25,12 @@ func (tg *TraceIDGenerator) Float32() float32 {
 
 	// Generate 4 random bytes and convert to float32
 	var bytes [4]byte
-	rand.Read(bytes[:])
+	_, err := rand.Read(bytes[:])
+	if err != nil {
+		// crypto/rand.Read only fails if system randomness is unavailable
+		// In such cases, we perform a graceful shutdown
+		util.Fatal("crypto/rand.Read failed - system randomness unavailable:", err)
+	}
 	// Convert to uint32 then to float32 in range [0,1)
 	return float32(uint32(bytes[0])<<24|uint32(bytes[1])<<16|uint32(bytes[2])<<8|uint32(bytes[3])) / float32(1<<32)
 }
@@ -55,7 +62,12 @@ func (tg *TraceIDGenerator) generateID(len int) string {
 	var bits [maxIDByteLen * 2]byte
 	tg.Lock()
 	defer tg.Unlock()
-	rand.Read(bits[:len])
+	_, err := rand.Read(bits[:len])
+	if err != nil {
+		// crypto/rand.Read only fails if system randomness is unavailable
+		// In such cases, we perform a graceful shutdown
+		util.Fatal("crypto/rand.Read failed - system randomness unavailable:", err)
+	}
 
 	// In-place encode
 	for i := len - 1; i >= 0; i-- {

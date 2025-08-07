@@ -68,8 +68,18 @@ func decodeUncompress(input string) ([]byte, error) {
 	}
 
 	var out bytes.Buffer
-	io.Copy(&out, gz)
-	gz.Close()
+	// #nosec G110 - Limit decompression to prevent DoS attacks
+	// Limit to 10MB decompressed size to prevent decompression bombs
+	limitedReader := &io.LimitedReader{R: gz, N: 10 << 20} // 10MB
+	_, err = io.Copy(&out, limitedReader)
+	if err != nil {
+		gz.Close()
+		return nil, err
+	}
+	err = gz.Close()
+	if err != nil {
+		return nil, err
+	}
 
 	return out.Bytes(), nil
 }

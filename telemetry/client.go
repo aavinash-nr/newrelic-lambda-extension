@@ -224,6 +224,7 @@ func (c *Client) attemptSend(ctx context.Context, currentPayloadBytes []byte, bu
 			if err, ok := err.(net.Error); ok && err.Timeout() {
 				// Use crypto/rand for secure random jitter instead of math/rand
 				var randBytes [1]byte
+				// #nosec G104 - crypto/rand.Read failure is extremely rare and non-critical for jitter
 				crypto_rand.Read(randBytes[:])
 				jitter := time.Duration(int(randBytes[0]) % 200) // 0-199ms jitter
 				timeout := baseSleepTime + jitter
