@@ -254,22 +254,29 @@ jobs:
           gosec -fmt sarif -out gosec-results.sarif -exclude-dir=examples ./... || true
           gosec -fmt json -out gosec-results.json -exclude-dir=examples ./... || true
           
-          # Run gosec and check for issues, excluding examples directory and ignoring compilation errors
-          if gosec -exclude-dir=examples -quiet ./...; then
+          # Run gosec and capture both stdout and stderr
+          gosec_output=$(gosec -exclude-dir=examples ./... 2>&1 || true)
+          echo "Gosec output:"
+          echo "$gosec_output"
+          
+          # Strip ANSI color codes and check for actual security issues in the Summary section
+          clean_output=$(echo "$gosec_output" | sed 's/\x1b\[[0-9;]*m//g')
+          if echo "$clean_output" | grep -A5 "Summary:" | grep -q "Issues.*:.*0"; then
             echo "gosec-result=success" >> $GITHUB_OUTPUT
             echo "✅ No security issues found by gosec"
+          elif echo "$clean_output" | grep -A5 "Summary:" | grep -q "Issues.*:.*[1-9]"; then
+            echo "gosec-result=failure" >> $GITHUB_OUTPUT
+            echo "⚠️ Security issues found by gosec"
+            echo "$gosec_output"
+            exit 1
           else
-            # Check if the failure is due to compilation errors vs actual security issues
-            gosec_output=$(gosec -exclude-dir=examples ./... 2>&1 || true)
-            
-            # Check if output contains actual security issues (not just compilation errors)
-            if echo "$gosec_output" | grep -q "Issues.*: 0"; then
+            # If output doesn't match expected patterns, check quiet mode as fallback
+            if gosec -exclude-dir=examples -quiet ./...; then
               echo "gosec-result=success" >> $GITHUB_OUTPUT
-              echo "✅ No security issues found by gosec (compilation errors ignored)"
+              echo "✅ No security issues found by gosec (quiet mode confirms)"
             else
               echo "gosec-result=failure" >> $GITHUB_OUTPUT
-              echo "⚠️ Security issues found by gosec"
-              echo "$gosec_output"
+              echo "⚠️ Security issues detected"
               exit 1
             fi
           fi
@@ -290,8 +297,8 @@ jobs:
             const fs = require('fs');
             let comment = '## 🔒 gosec Security Scan Results\n\n';
             
-            # Check gosec results based on step outcome
-            const gosecResult = '${{ steps.gosec_scan.outcome }}';
+            // Check gosec results based on step outcome
+            const gosecResult = '${{ steps.gosec_scan.outputs.gosec-result }}';
             if (gosecResult === 'failure') {
               comment += '⚠️ **gosec Security Scanner detected issues**\n\n';
               
@@ -369,7 +376,7 @@ jobs:
             });
 
       - name: Fail workflow if gosec vulnerabilities found
-        if: ${{ (github.event_name == 'pull_request' || github.event_name == 'push') && steps.gosec_scan.outcome == 'failure' }}
+        if: ${{ (github.event_name == 'pull_request' || github.event_name == 'push') && steps.gosec_scan.outputs.gosec-result == 'failure' }}
         run: |
           echo "❌ gosec detected security issues!"
           echo "Please review the security scan results above and address the issues."
