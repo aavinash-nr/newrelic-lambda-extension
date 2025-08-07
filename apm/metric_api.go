@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"regexp"
 	"strconv"
 	"strings"
@@ -213,8 +214,13 @@ func SendMetrics(apiKey string, metricEndpointOverride string, metrics []Metric,
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Api-Key", apiKey)
+	
+	// Only allow TLS verification to be skipped in development/test environments
+	// Check for explicit environment variable to enable insecure mode
+	allowInsecure := skipTLSVerify && os.Getenv("NEW_RELIC_ALLOW_INSECURE_TLS") == "true"
+	
 	tr := &http.Transport{
-		TLSClientConfig: &tls.Config{InsecureSkipVerify: skipTLSVerify},
+		TLSClientConfig: &tls.Config{InsecureSkipVerify: allowInsecure},
 	}
 	client := &http.Client{Transport: tr}
 	resp, err := client.Do(req)
