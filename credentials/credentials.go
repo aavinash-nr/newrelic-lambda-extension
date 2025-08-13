@@ -36,7 +36,11 @@ var (
 	ssmAPI     SSMAPI
 )
 
-const defaultSecretId = "NEW_RELIC_LICENSE_KEY"
+const (
+	// DefaultSecretName is the default name for the New Relic license key in AWS Secrets Manager
+	// #nosec G101 - This is a configuration constant, not a hardcoded credential
+	DefaultSecretName = "NEW_RELIC_LICENSE_KEY"
+)
 
 func init() {
 
@@ -58,7 +62,7 @@ func getLicenseKeySecretId(conf *config.Configuration) string {
 		return conf.LicenseKeySecretId
 	}
 
-	return defaultSecretId
+	return DefaultSecretName
 }
 
 func getLicenseKeySSMParameterName(conf *config.Configuration) string {
@@ -66,7 +70,7 @@ func getLicenseKeySSMParameterName(conf *config.Configuration) string {
 		return conf.LicenseKeySSMParameterName
 	}
 
-	return defaultSecretId
+	return DefaultSecretName
 }
 
 func decodeLicenseKey(rawJson *string) (string, error) {
@@ -135,19 +139,19 @@ func GetNewRelicLicenseKey(ctx context.Context, conf *config.Configuration) (str
 		return tryLicenseKeyFromSSMParameter(ctx, parameterName)
 	}
 
-	envLicenseKey, found := os.LookupEnv(defaultSecretId)
+	envLicenseKey, found := os.LookupEnv(DefaultSecretName)
 	if found {
 		return envLicenseKey, nil
 	}
 
 	util.Debugln("No configured license key found, attempting fallbacks to default")
 
-	licenseKey, err := tryLicenseKeyFromSecret(ctx, defaultSecretId)
+	licenseKey, err := tryLicenseKeyFromSecret(ctx, DefaultSecretName)
 	if err == nil {
 		return licenseKey, nil
 	}
 
-	licenseKey, err = tryLicenseKeyFromSSMParameter(ctx, defaultSecretId)
+	licenseKey, err = tryLicenseKeyFromSSMParameter(ctx, DefaultSecretName)
 	if err == nil {
 		return licenseKey, nil
 	}

@@ -17,7 +17,7 @@ import (
 
 func TestGetLicenseKeySecretId(t *testing.T) {
 	secretId := getLicenseKeySecretId(&config.Configuration{})
-	assert.Equal(t, defaultSecretId, secretId)
+	assert.Equal(t, DefaultSecretName, secretId)
 
 	var testSecretId = "testSecretName"
 	var conf = &config.Configuration{LicenseKeySecretId: testSecretId}
@@ -27,7 +27,7 @@ func TestGetLicenseKeySecretId(t *testing.T) {
 
 func TestGetLicenseKeySSMParameterName(t *testing.T) {
 	parameterName := getLicenseKeySSMParameterName(&config.Configuration{})
-	assert.Equal(t, defaultSecretId, parameterName)
+	assert.Equal(t, DefaultSecretName, parameterName)
 
 	var testParameterName = "testParameterName"
 	var conf = &config.Configuration{LicenseKeySSMParameterName: testParameterName}
@@ -366,7 +366,7 @@ func TestIsSecretConfiguredWithDefaultId(t *testing.T) {
 	defer func() { secretsAPI = originalSecrets }()
 
 	OverrideSecretsManager(mockSecretManager{
-		validSecrets: []string{defaultSecretId},
+		validSecrets: []string{DefaultSecretName},
 	})
 
 	assert.True(t, IsSecretConfigured(ctx, &config.Configuration{}))
@@ -379,7 +379,7 @@ func TestIsSSMParameterConfiguredWithDefaultParameter(t *testing.T) {
 	defer func() { ssmAPI = originalSSM }()
 
 	OverrideSSM(mockSSM{
-		validParameters: []string{defaultSecretId},
+		validParameters: []string{DefaultSecretName},
 	})
 	assert.True(t, IsSSMParameterConfigured(ctx, &config.Configuration{}))
 }
