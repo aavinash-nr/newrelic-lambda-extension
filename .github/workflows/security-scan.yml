@@ -2,15 +2,18 @@ name: Security Scan
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   pull_request:
-    branches:
-      - main
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
 
 jobs:
-  scan-go-dependencies:
-    name: Scan Go Dependencies
+  scan-fs:
+    name: Scan Go Dependencies (FS)
     runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
@@ -19,57 +22,63 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: "1.23"
           cache-dependency-path: go.sum
 
       - name: Download Go modules
         run: go mod download
 
-      - name: Run Trivy FS Scan for Go Modules
+      - name: Trivy cache cleanup
+        run: trivy clean --all || true
+
+      - name: Trivy FS Scan
         uses: aquasecurity/trivy-action@0.32.0
-        id: trivy_fs_scan
+        id: trivy_fs
         with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'sarif'
-          output: 'trivy-go-results.sarif'
-          exit-code: '1'
-          ignore-unfixed: true
-          severity: 'CRITICAL,HIGH'
-          vuln-type: 'library'
+          scan-type: fs
+          scan-ref: .
+          vuln-type: library
+          list-all-pkgs: true
+          dependency-tree: true
+          format: sarif
+          output: trivy-fs.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: false
+          exit-code: 1
         continue-on-error: true
 
-      - name: Generate Trivy table for comments
-        if: ${{ steps.trivy_fs_scan.outcome == 'failure' }}
-        uses:  aquasecurity/trivy-action@0.32.0
-        with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          format: 'table'
-          output: 'trivy-go-table.txt'
-          exit-code: '0'
-          ignore-unfixed: true
-          severity: 'CRITICAL,HIGH,MEDIUM,LOW'
-          vuln-type: 'library'
-
-      - name: Upload Go Scan Artifacts
+      - name: Generate FS Table
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: aquasecurity/trivy-action@0.32.0
         with:
-          name: go-scan-artifacts
-          path: |
-            trivy-go-results.sarif
-            trivy-go-table.txt
-          if-no-files-found: ignore
+          scan-type: fs
+          scan-ref: .
+          vuln-type: library
+          list-all-pkgs: true
+          dependency-tree: true
+          format: table
+          output: trivy-fs.txt
+          severity: CRITICAL,HIGH,MEDIUM,LOW
+          ignore-unfixed: false
+          exit-code: 0
 
-  scan-images:
-    name: Scan OS Packages in Docker Images
+      - name: Upload FS scan artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: fs-scan
+          path: |
+            trivy-fs.sarif
+            trivy-fs.txt
+
+  scan-image:
+    name: Scan Docker Images
     runs-on: ubuntu-24.04
+    needs: scan-fs
     strategy:
       fail-fast: false
       matrix:
         arch: [amd64, arm64]
-    
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
@@ -80,121 +89,31 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build Docker image for ${{ matrix.arch }}
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/${{ matrix.arch }}
-          tags: my-app-scan:${{ github.sha }}-${{ matrix.arch }}
-          load: true
+      - name: Build Docker image
+        run: |
+          docker build --build-arg TARGETARCH=${{ matrix.arch }} \
+            --platform linux/${{ matrix.arch }} \
+            -t my-app-scan:${{ github.sha }}-${{ matrix.arch }} .
 
-      - name: Run Trivy Image Scan for OS packages
-        uses:  aquasecurity/trivy-action@0.32.0
-        id: trivy_image_scan
+      - name: Trivy Image Scan
+        uses: aquasecurity/trivy-action@0.32.0
+        id: trivy_img
         with:
-          scan-type: 'image'
-          image-ref: 'my-app-scan:${{ github.sha }}-${{ matrix.arch }}'
-          format: 'sarif'
-          output: 'trivy-os-results-${{ matrix.arch }}.sarif'
-          exit-code: '1'
-          ignore-unfixed: true
-          severity: 'CRITICAL,HIGH'
-          vuln-type: 'os'
+          scan-type: image
+          image-ref: my-app-scan:${{ github.sha }}-${{ matrix.arch }}
+          vuln-type: os,library
+          list-all-pkgs: true
+          dependency-tree: true
+          format: sarif
+          output: trivy-image-${{ matrix.arch }}.sarif
+          severity: CRITICAL,HIGH
+          ignore-unfixed: false
+          exit-code: 1
         continue-on-error: true
 
-      - name: Generate Trivy table for comments
-        if: ${{ steps.trivy_image_scan.outcome == 'failure' }}
-        uses:  aquasecurity/trivy-action@0.32.0
-        with:
-          scan-type: 'image'
-          image-ref: 'my-app-scan:${{ github.sha }}-${{ matrix.arch }}'
-          format: 'table'
-          output: 'trivy-os-table-${{ matrix.arch }}.txt'
-          exit-code: '0'
-          ignore-unfixed: true
-          severity: 'CRITICAL,HIGH,MEDIUM,LOW'
-          vuln-type: 'os'
-
-      - name: Upload OS Scan Artifacts
+      - name: Generate Image Table
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: aquasecurity/trivy-action@0.32.0
         with:
-          name: os-scan-artifacts-${{ matrix.arch }}
-          path: |
-            trivy-os-results-${{ matrix.arch }}.sarif
-            trivy-os-table-${{ matrix.arch }}.txt
-          if-no-files-found: ignore
-
-  summarize:
-    name: Summarize and Report
-    runs-on: ubuntu-24.04
-    needs: [scan-go-dependencies, scan-images]
-    if: always()
-
-    permissions:
-      security-events: write
-      pull-requests: write
-      contents: read
-
-    steps:
-      - name: Download all scan artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
-
-      - name: Prepare comment
-        id: prep_comment
-        run: |
-          GO_TABLE="artifacts/go-scan-artifacts/trivy-go-table.txt"
-          AMD64_TABLE="artifacts/os-scan-artifacts-amd64/trivy-os-table-amd64.txt"
-          ARM64_TABLE="artifacts/os-scan-artifacts-arm64/trivy-os-table-arm64.txt"
-          COMMENT_BODY="## 🔒 Security Scan Results\n\n"
-          
-          # Go Dependencies Section
-          if [ -f "$GO_TABLE" ]; then
-            COMMENT_BODY="${COMMENT_BODY}### ⚠️ Vulnerabilities found in Go Dependencies\n\n<details><summary>Click to view summary</summary>\n\n\`\`\`\n$(cat $GO_TABLE)\n\`\`\`\n\n</details>\n\n"
-          else
-            COMMENT_BODY="${COMMENT_BODY}### ✅ No vulnerabilities found in Go Dependencies\n"
-          fi
-
-          # OS Packages Section
-          COMMENT_BODY="${COMMENT_BODY}--- \n\n"
-          if [ -f "$AMD64_TABLE" ] || [ -f "$ARM64_TABLE" ]; then
-            COMMENT_BODY="${COMMENT_BODY}### ⚠️ Vulnerabilities found in OS Packages\n"
-            if [ -f "$AMD64_TABLE" ]; then
-              COMMENT_BODY="${COMMENT_BODY}**x86_64 (amd64) Image:**\n<details><summary>Click to view summary</summary>\n\n\`\`\`\n$(cat $AMD64_TABLE)\n\`\`\`\n\n</details>\n"
-            fi
-            if [ -f "$ARM64_TABLE" ]; then
-              COMMENT_BODY="${COMMENT_BODY}**arm64 Image:**\n<details><summary>Click to view summary</summary>\n\n\`\`\`\n$(cat $ARM64_TABLE)\n\`\`\`\n\n</details>\n"
-            fi
-          else
-            COMMENT_BODY="${COMMENT_BODY}### ✅ No vulnerabilities found in OS Packages for either architecture\n"
-          fi
-          
-          echo "comment_body<<EOF" >> $GITHUB_OUTPUT
-          echo "$COMMENT_BODY" >> $GITHUB_OUTPUT
-          echo "EOF" >> $GITHUB_OUTPUT
-
-      - name: Upload all SARIF reports to GitHub Security
-        uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: artifacts
-
-      - name: Comment on PR
-        if: github.event_name == 'pull_request' && (needs.scan-go-dependencies.result == 'failure' || needs.scan-images.result == 'failure')
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const body = `${{ steps.prep_comment.outputs.comment_body }}`;
-            github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: body
-            });
-
-      - name: Check overall results and fail workflow if needed
-        if: ${{ needs.scan-go-dependencies.result == 'failure' || needs.scan-images.result == 'failure' }}
-        run: |
-          echo "❌ One or more security scans failed."
-          exit 1
+          scan-type: image
+          image-ref: my-app-scan:${{ github.sha }}-${{ matrix.arch }}
