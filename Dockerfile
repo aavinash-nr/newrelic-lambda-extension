@@ -13,9 +13,9 @@ RUN go mod download
 COPY . .
 
 RUN if [ "${TARGETARCH}" = "amd64" ]; then \
-      make dist-x86_64; \
+      make build-for-scan-x86_64; \
     elif [ "${TARGETARCH}" = "arm64" ]; then \
-      make dist-arm64; \
+      make build-for-scan-arm64; \
     else \
       echo "Unsupported architecture: ${TARGETARCH}" && exit 1; \
     fi
