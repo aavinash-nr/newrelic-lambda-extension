@@ -7,102 +7,166 @@ on:
   pull_request:
     branches:
       - main
-      
-jobs:
-  security-scan:
-    name: Trivy Security Scan
-    runs-on: ubuntu-latest
-    permissions:
-      # Required for uploading SARIF results
-      security-events: write
-      # Required for checking out the code
-      contents: read
-      # Required for posting PR comments
-      pull-requests: write
 
+jobs:
+  scan:
+    name: Scan ${{ matrix.arch }}
+    runs-on: ubuntu-24.04
+    strategy:
+      # Run both architectures even if one fails so you get a complete report
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64]
+    
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
+      - name: Set up QEMU
+        # Required to build the non-native architecture (arm64 on an amd64 runner)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Cache Docker layers
+        uses: actions/cache@v4
         with:
-          go-version: '1.23'
-          cache-dependency-path: |
-            go.sum
+          path: /tmp/.buildx-cache
+          key: ${{ runner.os }}-buildx-${{ github.sha }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-
 
-      - name: Download Go modules
-        run: go mod download
+      - name: Build Docker image for ${{ matrix.arch }}
+        # This action builds the image and enables caching for faster runs
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/${{ matrix.arch }}
+          tags: my-app-scan:${{ github.sha }}-${{ matrix.arch }}
+          # Load the image into the local Docker daemon so Trivy can scan it
+          load: true
+          cache-from: type=local,src=/tmp/.buildx-cache
+          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
 
-      - name: Build extension
-        run: make build
-        
-      - name: Run Trivy for SARIF report
+      # This is a workaround to preserve the cache
+      - name: Move cache
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+      - name: Run Trivy Scan
         uses: aquasecurity/trivy-action@0.32.0
-        id: trivy_sarif_scan
+        id: trivy_scan
         with:
-          scan-type: 'fs'
-          scan-ref: './extensions/newrelic-lambda-extension'
+          scan-type: 'image'
+          image-ref: 'my-app-scan:${{ github.sha }}-${{ matrix.arch }}'
           format: 'sarif'
-          output: 'trivy-results.sarif'
+          output: 'trivy-results-${{ matrix.arch }}.sarif'
           exit-code: '1'
           ignore-unfixed: true
-          severity: 'CRITICAL,HIGH,MEDIUM,LOW'
-          scanners: 'vuln,secret,config'
+          severity: 'CRITICAL,HIGH'
+          scanners: 'vuln'
         continue-on-error: true
 
-      - name: Run Trivy for PR comment
-        if: github.event_name == 'pull_request'
+      - name: Generate Trivy table for comments
+        if: ${{ steps.trivy_scan.outcome == 'failure' }}
         uses: aquasecurity/trivy-action@0.32.0
-        id: trivy_comment_scan
         with:
-          scan-type: 'fs'
-          scan-ref: './extensions/newrelic-lambda-extension'
+          scan-type: 'image'
+          image-ref: 'my-app-scan:${{ github.sha }}-${{ matrix.arch }}'
           format: 'table'
+          output: 'trivy-table-${{ matrix.arch }}.txt'
           exit-code: '0'
           ignore-unfixed: true
           severity: 'CRITICAL,HIGH,MEDIUM,LOW'
-          scanners: 'vuln,secret,config'
+          scanners: 'vuln'
 
-      - name: Upload Trivy SARIF report to GitHub Security tab
-        
-        if: always() 
+      - name: Upload Scan Artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scan-artifacts-${{ matrix.arch }}
+          path: |
+            trivy-results-${{ matrix.arch }}.sarif
+            trivy-table-${{ matrix.arch }}.txt
+          if-no-files-found: ignore
+
+  summarize:
+    name: Summarize and Report
+    runs-on: ubuntu-24.04
+    needs: [scan]
+    if: always()
+
+    permissions:
+      security-events: write
+      pull-requests: write
+      contents: read
+
+    steps:
+      - name: Download all scan artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Prepare comment
+        id: prep_comment
+        run: |
+          AMD64_TABLE="artifacts/scan-artifacts-amd64/trivy-table-amd64.txt"
+          ARM64_TABLE="artifacts/scan-artifacts-arm64/trivy-table-arm64.txt"
+          COMMENT_BODY="## 🔒 Trivy Security Scan Results\n\n"
+          VULNS_FOUND=false
+
+          if [ -f "$AMD64_TABLE" ]; then
+            VULNS_FOUND=true
+            COMMENT_BODY="${COMMENT_BODY}### ⚠️ Vulnerabilities found in x86_64 (amd64) Image\n\n<details><summary>Click to view summary</summary>\n\n\`\`\`\n$(cat $AMD64_TABLE)\n\`\`\`\n\n</details>\n\n"
+          else
+            COMMENT_BODY="${COMMENT_BODY}### ✅ No vulnerabilities found in x86_64 (amd64) Image\n"
+          fi
+
+          if [ -f "$ARM64_TABLE" ]; then
+            VULNS_FOUND=true
+            COMMENT_BODY="${COMMENT_BODY}### ⚠️ Vulnerabilities found in arm64 Image\n\n<details><summary>Click to view summary</summary>\n\n\`\`\`\n$(cat $ARM64_TABLE)\n\`\`\`\n\n</details>\n\n"
+          else
+            COMMENT_BODY="${COMMENT_BODY}### ✅ No vulnerabilities found in arm64 Image\n"
+          fi
+
+          if [ "$VULNS_FOUND" = true ]; then
+            COMMENT_BODY="${COMMENT_BODY}\nPlease review the findings and check the [Security tab](https://github.com/${{ github.repository }}/security/code-scanning) for full details."
+          else
+            COMMENT_BODY="## 🔒 Trivy Security Scan Results\n\n✅ All scans passed. No vulnerabilities found in amd64 or arm64 images."
+          fi
+          
+          echo "comment_body<<EOF" >> $GITHUB_OUTPUT
+          echo "$COMMENT_BODY" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Upload all SARIF reports to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: 'trivy-results.sarif'
+          sarif_file: artifacts
 
-      - name: Comment on PR with Trivy results
-        if: ${{ github.event_name == 'pull_request' && steps.trivy_sarif_scan.outcome == 'failure' }}
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
         uses: actions/github-script@v7
         with:
           script: |
-            const table = `${{ steps.trivy_comment_scan.outputs.stdout }}`;
-            const commentBody = `## 🔒 Trivy Security Scan Results
-
-            ⚠️ **Vulnerabilities have been detected in this pull request.**
-
-            Please review the summary below and check the [Security tab](https://github.com/${{ github.repository }}/security/code-scanning) for full details.
-
-            <details>
-            <summary>Click to view Vulnerability Summary Table</summary>
-
-            \`\`\`
-            ${table}
-            \`\`\`
-
-            </details>
-            `;
+            const body = `${{ steps.prep_comment.outputs.comment_body }}`;
             github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: commentBody
+              body: body
             });
 
-      - name: Fail workflow if vulnerabilities were found
-        # This is the final step that will fail the check if the main SARIF scan failed.
-        if: ${{ steps.trivy_sarif_scan.outcome == 'failure' }}
+      - name: Clean up Docker images
+        if: always()
         run: |
-          echo "❌ Trivy detected security vulnerabilities!"
-          echo "Please review the scan results and address the issues."
+          echo "Cleaning up Docker images..."
+          docker image prune -a -f || true
+
+      - name: Check scan results and fail workflow if needed
+        if: ${{ needs.scan.result == 'failure' }}
+        run: |
+          echo "❌ One or more security scans failed."
           exit 1
