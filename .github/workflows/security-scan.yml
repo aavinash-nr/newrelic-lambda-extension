@@ -9,9 +9,31 @@ on:
       - main
 
 jobs:
-  scan:
-    name: Scan ${{ matrix.arch }}
+  govulncheck:
+    name: Go Vulnerability Check
     runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache-dependency-path: go.sum
+
+      - name: Download Go modules
+        run: go mod download
+
+      - name: Run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
+  scan-images:
+    name: Scan Docker Images
+    runs-on: ubuntu-24.04
+    needs: [govulncheck]
     strategy:
       fail-fast: false
       matrix:
@@ -22,7 +44,6 @@ jobs:
         uses: actions/checkout@v5
 
       - name: Set up QEMU
-        # Required to build the non-native architecture (arm64 on an amd64 runner)
         uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
@@ -62,7 +83,7 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
           severity: 'CRITICAL,HIGH'
-          scanners: 'vuln'
+          scanners: 'vuln,misconfig'
         continue-on-error: true
 
       - name: Generate Trivy table for comments
@@ -72,12 +93,11 @@ jobs:
           scan-type: 'image'
           image-ref: 'my-app-scan:${{ github.sha }}-${{ matrix.arch }}'
           format: 'table'
-          dependency-tree: true
           output: 'trivy-table-${{ matrix.arch }}.txt'
           exit-code: '0'
           ignore-unfixed: true
           severity: 'CRITICAL,HIGH,MEDIUM,LOW'
-          scanners: 'vuln'
+          scanners: 'vuln,misconfig'
 
       - name: Upload Scan Artifacts
         if: always()
@@ -92,7 +112,7 @@ jobs:
   summarize:
     name: Summarize and Report
     runs-on: ubuntu-24.04
-    needs: [scan]
+    needs: [scan-images]
     if: always()
 
     permissions:
@@ -111,27 +131,27 @@ jobs:
         run: |
           AMD64_TABLE="artifacts/scan-artifacts-amd64/trivy-table-amd64.txt"
           ARM64_TABLE="artifacts/scan-artifacts-arm64/trivy-table-arm64.txt"
-          COMMENT_BODY="## 🔒 Trivy Security Scan Results\n\n"
+          COMMENT_BODY="## 🔒 Security Scan Results\n\n"
           VULNS_FOUND=false
 
           if [ -f "$AMD64_TABLE" ]; then
             VULNS_FOUND=true
-            COMMENT_BODY="${COMMENT_BODY}### ⚠️ Vulnerabilities found in x86_64 (amd64) Image\n\n<details><summary>Click to view summary</summary>\n\n\`\`\`\n$(cat $AMD64_TABLE)\n\`\`\`\n\n</details>\n\n"
+            COMMENT_BODY="${COMMENT_BODY}### ⚠️ Issues found in x86_64 (amd64) Image\n\n<details><summary>Click to view summary</summary>\n\n\`\`\`\n$(cat $AMD64_TABLE)\n\`\`\`\n\n</details>\n\n"
           else
-            COMMENT_BODY="${COMMENT_BODY}### ✅ No vulnerabilities found in x86_64 (amd64) Image\n"
+            COMMENT_BODY="${COMMENT_BODY}### ✅ No issues found in x86_64 (amd64) Image\n"
           fi
 
           if [ -f "$ARM64_TABLE" ]; then
             VULNS_FOUND=true
-            COMMENT_BODY="${COMMENT_BODY}### ⚠️ Vulnerabilities found in arm64 Image\n\n<details><summary>Click to view summary</summary>\n\n\`\`\`\n$(cat $ARM64_TABLE)\n\`\`\`\n\n</details>\n\n"
+            COMMENT_BODY="${COMMENT_BODY}### ⚠️ Issues found in arm64 Image\n\n<details><summary>Click to view summary</summary>\n\n\`\`\`\n$(cat $ARM64_TABLE)\n\`\`\`\n\n</details>\n\n"
           else
-            COMMENT_BODY="${COMMENT_BODY}### ✅ No vulnerabilities found in arm64 Image\n"
+            COMMENT_BODY="${COMMENT_BODY}### ✅ No issues found in arm64 Image\n"
           fi
 
           if [ "$VULNS_FOUND" = true ]; then
             COMMENT_BODY="${COMMENT_BODY}\nPlease review the findings and check the [Security tab](https://github.com/${{ github.repository }}/security/code-scanning) for full details."
           else
-            COMMENT_BODY="## 🔒 Trivy Security Scan Results\n\n✅ All scans passed. No vulnerabilities found in amd64 or arm64 images."
+            COMMENT_BODY="## 🔒 Security Scan Results\n\n✅ All scans passed. No vulnerabilities or misconfigurations found in amd64 or arm64 images."
           fi
           
           echo "comment_body<<EOF" >> $GITHUB_OUTPUT
@@ -139,19 +159,21 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Upload amd64 SARIF report
+        if: success() || failure()
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: artifacts/scan-artifacts-amd64/trivy-results-amd64.sarif
           category: trivy-amd64
 
       - name: Upload arm64 SARIF report
+        if: success() || failure()
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: artifacts/scan-artifacts-arm64/trivy-results-arm64.sarif
           category: trivy-arm64
 
       - name: Comment on PR
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && (needs.scan-images.result == 'failure')
         uses: actions/github-script@v7
         with:
           script: |
@@ -163,14 +185,8 @@ jobs:
               body: body
             });
 
-      - name: Clean up Docker images
-        if: always()
-        run: |
-          echo "Cleaning up Docker images..."
-          docker image prune -a -f || true
-
-      - name: Check scan results and fail workflow if needed
-        if: ${{ needs.scan.result == 'failure' }}
+      - name: Check overall results and fail workflow if needed
+        if: ${{ needs.scan-images.result == 'failure' }}
         run: |
           echo "❌ One or more security scans failed."
           exit 1
