@@ -1,6 +1,6 @@
 module github.com/newrelic/newrelic-lambda-extension
 
-go 1.23.8
+go 1.23.7
 
 // Go experimental release X25519Kyber768Draft00 is causing issue with AWS Network Firewall
 godebug tlskyber=0
