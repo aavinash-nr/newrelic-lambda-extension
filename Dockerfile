@@ -20,6 +20,7 @@ RUN if [ "${TARGETARCH}" = "amd64" ]; then \
       echo "Unsupported architecture: ${TARGETARCH}" && exit 1; \
     fi
 
+FROM alpine:3.20
 
 # It's good practice to add ca-certificates for any potential HTTPS communication.
 RUN apk add --no-cache ca-certificates
