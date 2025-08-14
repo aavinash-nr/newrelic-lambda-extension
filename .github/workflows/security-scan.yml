@@ -13,7 +13,6 @@ jobs:
     name: Scan ${{ matrix.arch }}
     runs-on: ubuntu-24.04
     strategy:
-      # Run both architectures even if one fails so you get a complete report
       fail-fast: false
       matrix:
         arch: [amd64, arm64]
@@ -38,18 +37,15 @@ jobs:
             ${{ runner.os }}-buildx-
 
       - name: Build Docker image for ${{ matrix.arch }}
-        # This action builds the image and enables caching for faster runs
         uses: docker/build-push-action@v5
         with:
           context: .
           platforms: linux/${{ matrix.arch }}
           tags: my-app-scan:${{ github.sha }}-${{ matrix.arch }}
-          # Load the image into the local Docker daemon so Trivy can scan it
           load: true
           cache-from: type=local,src=/tmp/.buildx-cache
           cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
 
-      # This is a workaround to preserve the cache
       - name: Move cache
         run: |
           rm -rf /tmp/.buildx-cache
@@ -76,6 +72,7 @@ jobs:
           scan-type: 'image'
           image-ref: 'my-app-scan:${{ github.sha }}-${{ matrix.arch }}'
           format: 'table'
+          dependency-tree: true
           output: 'trivy-table-${{ matrix.arch }}.txt'
           exit-code: '0'
           ignore-unfixed: true
