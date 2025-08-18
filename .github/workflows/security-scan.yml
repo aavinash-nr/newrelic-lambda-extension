@@ -32,11 +32,12 @@ jobs:
       - name: Download Go modules
         run: go mod download
 
-      # This is the primary scan for your Go module vulnerabilities.
-      # The `trivy-db-repository` flag ensures it downloads the latest vulnerability database.
       - name: 🛑 Scan for vulnerabilities (Blocker)
         id: scan_blocker
         uses: aquasecurity/trivy-action@0.32.0
+        continue-on-error: true
+        env:
+          TRIVY_RESET: 'true'
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -46,9 +47,6 @@ jobs:
           severity: 'CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN'
           exit-code: 1
           ignore-unfixed: false
-          # ADD THIS LINE to force a fresh DB download
-          trivy-db-repository: 'ghcr.io/aquasecurity/trivy-db'
-          continue-on-error: true
 
       - name: Generate report for PR comment
         if: steps.scan_blocker.outcome == 'failure'
@@ -113,10 +111,15 @@ jobs:
             -t my-app-scan:${{ github.sha }}-${{ matrix.arch }} .
 
       # This scan checks the final image, including the Go standard library version.
-      # The `trivy-db-repository` flag ensures it downloads the latest vulnerability database.
       - name: 🛑 Scan image for vulnerabilities (Blocker)
         id: image_scan_blocker
         uses: aquasecurity/trivy-action@0.32.0
+        # Moved 'continue-on-error' to the step level where it belongs.
+        continue-on-error: true
+        # Use the 'env' block to pass environment variables to the Trivy binary.
+        env:
+          # TRIVY_RESET forces Trivy to clear all caches and download a fresh database.
+          TRIVY_RESET: 'true'
         with:
           scan-type: 'image'
           image-ref: 'my-app-scan:${{ github.sha }}-${{ matrix.arch }}'
@@ -125,9 +128,6 @@ jobs:
           severity: 'CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN'
           exit-code: 1
           ignore-unfixed: false
-          # ADD THIS LINE to force a fresh DB download
-          trivy-db-repository: 'ghcr.io/aquasecurity/trivy-db'
-          continue-on-error: true
 
       - name: Generate report for PR comment
         if: steps.image_scan_blocker.outcome == 'failure'
