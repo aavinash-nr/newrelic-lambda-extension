@@ -32,12 +32,18 @@ jobs:
       - name: Download Go modules
         run: go mod download
 
+      # FIX 1: Add a step to clear the Trivy cache directory before scanning.
+      # This ensures a fresh vulnerability database is downloaded every time.
+      - name: Clear Trivy cache
+        run: rm -rf ${{ github.workspace }}/.cache/trivy
+
+      # This is the primary scan for your Go module vulnerabilities.
       - name: 🛑 Scan for vulnerabilities (Blocker)
         id: scan_blocker
         uses: aquasecurity/trivy-action@0.32.0
+        # Moved 'continue-on-error' to the step level where it belongs.
         continue-on-error: true
-        env:
-          TRIVY_RESET: 'true'
+        # FIX 1: Removed the deprecated 'TRIVY_RESET' environment variable.
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -68,7 +74,8 @@ jobs:
           issue-number: ${{ github.event.pull_request.number }}
           body-file: trivy-fs-comment-report.txt
           edit-mode: replace
-          unique-id-for-comment: fs-scan-results
+          # FIX 2: Removed the invalid 'unique-id-for-comment' input.
+          # The action automatically finds and updates its own previous comments.
 
       - name: ✅ Scan and submit to GitHub Dependency Graph
         if: always()
@@ -110,16 +117,17 @@ jobs:
             --platform linux/${{ matrix.arch }} \
             -t my-app-scan:${{ github.sha }}-${{ matrix.arch }} .
 
+      # FIX 1: Add a step to clear the Trivy cache directory before scanning.
+      - name: Clear Trivy cache
+        run: rm -rf ${{ github.workspace }}/.cache/trivy
+
       # This scan checks the final image, including the Go standard library version.
       - name: 🛑 Scan image for vulnerabilities (Blocker)
         id: image_scan_blocker
         uses: aquasecurity/trivy-action@0.32.0
         # Moved 'continue-on-error' to the step level where it belongs.
         continue-on-error: true
-        # Use the 'env' block to pass environment variables to the Trivy binary.
-        env:
-          # TRIVY_RESET forces Trivy to clear all caches and download a fresh database.
-          TRIVY_RESET: 'true'
+        # FIX 1: Removed the deprecated 'TRIVY_RESET' environment variable.
         with:
           scan-type: 'image'
           image-ref: 'my-app-scan:${{ github.sha }}-${{ matrix.arch }}'
@@ -148,7 +156,7 @@ jobs:
           issue-number: ${{ github.event.pull_request.number }}
           body-file: 'trivy-image-comment-report.txt'
           edit-mode: replace
-          unique-id-for-comment: image-scan-${{ matrix.arch }}
+          # FIX 2: Removed the invalid 'unique-id-for-comment' input.
           
       - name: Fail job if vulnerabilities were found
         if: steps.image_scan_blocker.outcome == 'failure'
