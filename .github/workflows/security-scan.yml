@@ -43,7 +43,7 @@ jobs:
           output: 'trivy-fs-results.sarif'
           severity: 'CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN'
           exit-code: 1
-          ignore-unfixed: true
+          ignore-unfixed: false
         continue-on-error: true
 
       - name: Generate report for PR comment
@@ -57,7 +57,7 @@ jobs:
           output: 'trivy-fs-comment-report.txt'
           severity: 'CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN'
           exit-code: 0
-          ignore-unfixed: true
+          ignore-unfixed: false
           
       - name: Post vulnerability report on PR
         if: steps.scan_blocker.outcome == 'failure' && github.event_name == 'pull_request'
@@ -118,7 +118,7 @@ jobs:
           output: 'trivy-image-results.sarif'
           severity: 'CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN'
           exit-code: 1
-          ignore-unfixed: true
+          ignore-unfixed: false
         continue-on-error: true
 
       - name: Generate report for PR comment
@@ -131,7 +131,7 @@ jobs:
           output: 'trivy-image-comment-report.txt'
           severity: 'CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN'
           exit-code: 0
-          ignore-unfixed: true
+          ignore-unfixed: false
       
       - name: Post vulnerability report on PR
         if: steps.image_scan_blocker.outcome == 'failure' && github.event_name == 'pull_request'
