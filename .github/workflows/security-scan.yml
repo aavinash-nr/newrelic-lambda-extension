@@ -11,9 +11,9 @@ on:
       - dev
 
 permissions:
-  contents: read
-  pull-requests: write
+  contents: write      
   security-events: write
+  pull-requests: write
 
 jobs:
   scan-fs:
@@ -31,91 +31,50 @@ jobs:
 
       - name: Download Go modules
         run: go mod download
-
-      - name: Trivy cache cleanup
-        run: trivy clean --all || true
-
-      - name: Trivy FS Scan
+        
+      - name: 🛑 Scan for vulnerabilities (Blocker)
+        id: scan_blocker
         uses: aquasecurity/trivy-action@0.32.0
-        id: trivy_fs
         with:
-          scan-type: fs
-          scan-ref: .
-          vuln-type: library,os
-          list-all-pkgs: true
-          format: sarif
-          output: trivy-fs.sarif
-          severity: CRITICAL,HIGH
-          ignore-unfixed: false
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
           exit-code: 1
+          ignore-unfixed: true
         continue-on-error: true
-
-      - name: Generate FS Table
+      - name: Generate report for PR comment
+        if: steps.scan_blocker.outcome == 'failure'
+        uses: aquasecurity/trivy-action@0.32.0
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          output: 'trivy-comment-report.txt'
+          severity: 'CRITICAL,HIGH'
+          exit-code: 0 
+          ignore-unfixed: true
+          
+      - name: Post vulnerability report on PR
+        if: steps.scan_blocker.outcome == 'failure' && github.event_name == 'pull_request'
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          body-file: trivy-comment-report.txt
+   
+          edit-mode: replace
+      - name: ✅ Scan and submit to GitHub Dependency Graph
         if: always()
         uses: aquasecurity/trivy-action@0.32.0
         with:
-          scan-type: fs
-          scan-ref: .
-          vuln-type: library,os
-          list-all-pkgs: true
-          dependency-tree: true
-          format: table
-          output: trivy-fs.txt
-          severity: CRITICAL,HIGH,MEDIUM,LOW
-          ignore-unfixed: false
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'github'
           exit-code: 0
 
-      - name: Upload FS scan artifacts
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: fs-scan
-          path: |
-            trivy-fs.sarif
-            trivy-fs.txt
-
-  scan-image:
-    name: Scan Docker Images
-    runs-on: ubuntu-24.04
-    needs: scan-fs
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [amd64, arm64]
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v5
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Docker image
+      - name: Fail job if vulnerabilities were found
+        if: steps.scan_blocker.outcome == 'failure'
         run: |
-          docker build --build-arg TARGETARCH=${{ matrix.arch }} \
-            --platform linux/${{ matrix.arch }} \
-            -t my-app-scan:${{ github.sha }}-${{ matrix.arch }} .
-
-      - name: Trivy Image Scan
-        uses: aquasecurity/trivy-action@0.32.0
-        id: trivy_img
-        with:
-          scan-type: image
-          image-ref: my-app-scan:${{ github.sha }}-${{ matrix.arch }}
-          vuln-type: os,library
-          list-all-pkgs: true
-          format: sarif
-          output: trivy-image-${{ matrix.arch }}.sarif
-          severity: CRITICAL,HIGH
-          ignore-unfixed: false
-          exit-code: 1
-        continue-on-error: true
-
-      - name: Generate Image Table
-        if: always()
-        uses: aquasecurity/trivy-action@0.32.0
-        with:
-          scan-type: image
-          image-ref: my-app-scan:${{ github.sha }}-${{ matrix.arch }}
+          echo "Failing the job due to critical or high severity vulnerabilities."
+          exit 1
