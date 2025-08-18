@@ -11,7 +11,7 @@ on:
       - dev
 
 permissions:
-  contents: write        
+  contents: write   
   security-events: write
   pull-requests: write
 
@@ -41,14 +41,13 @@ jobs:
           skip-dirs: 'examples'
           format: 'sarif'
           output: 'trivy-fs-results.sarif'
-          severity: 'CRITICAL,HIGH'
+          severity: 'CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN'
           exit-code: 1
           ignore-unfixed: true
         continue-on-error: true
 
       - name: Generate report for PR comment
         if: steps.scan_blocker.outcome == 'failure'
-        id: generate_fs_report
         uses: aquasecurity/trivy-action@0.32.0
         with:
           scan-type: 'fs'
@@ -56,7 +55,7 @@ jobs:
           skip-dirs: 'examples'
           format: 'table'
           output: 'trivy-fs-comment-report.txt'
-          severity: 'CRITICAL,HIGH'
+          severity: 'CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN'
           exit-code: 0
           ignore-unfixed: true
           
@@ -85,6 +84,7 @@ jobs:
           echo "Failing the job due to filesystem vulnerabilities."
           exit 1
 
+  # JOB 2: Image Scan
   scan-image:
     name: Scan Docker Images
     runs-on: ubuntu-24.04
@@ -116,7 +116,7 @@ jobs:
           image-ref: 'my-app-scan:${{ github.sha }}-${{ matrix.arch }}'
           format: 'sarif'
           output: 'trivy-image-results.sarif'
-          severity: 'CRITICAL,HIGH'
+          severity: 'CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN'
           exit-code: 1
           ignore-unfixed: true
         continue-on-error: true
@@ -129,7 +129,7 @@ jobs:
           image-ref: 'my-app-scan:${{ github.sha }}-${{ matrix.arch }}'
           format: 'table'
           output: 'trivy-image-comment-report.txt'
-          severity: 'CRITICAL,HIGH'
+          severity: 'CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN'
           exit-code: 0
           ignore-unfixed: true
       
