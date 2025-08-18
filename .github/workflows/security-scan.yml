@@ -34,7 +34,7 @@ jobs:
 
       - name: 🛑 Scan for vulnerabilities (Blocker)
         id: scan_blocker
-        uses: aquasecurity/trivy-action@0.67.0
+        uses: aquasecurity/trivy-action@0.32.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -48,7 +48,7 @@ jobs:
 
       - name: Generate report for PR comment
         if: steps.scan_blocker.outcome == 'failure'
-        uses: aquasecurity/trivy-action@0.67.0
+        uses: aquasecurity/trivy-action@0.32.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -70,7 +70,7 @@ jobs:
 
       - name: ✅ Scan and submit to GitHub Dependency Graph
         if: always()
-        uses: aquasecurity/trivy-action@0.67.0
+        uses: aquasecurity/trivy-action@0.32.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
@@ -110,7 +110,7 @@ jobs:
 
       - name: 🛑 Scan image for vulnerabilities (Blocker)
         id: image_scan_blocker
-        uses: aquasecurity/trivy-action@0.67.0
+        uses: aquasecurity/trivy-action@0.32.0
         with:
           scan-type: 'image'
           image-ref: 'my-app-scan:${{ github.sha }}-${{ matrix.arch }}'
@@ -123,7 +123,7 @@ jobs:
 
       - name: Generate report for PR comment
         if: steps.image_scan_blocker.outcome == 'failure'
-        uses: aquasecurity/trivy-action@0.67.0
+        uses: aquasecurity/trivy-action@0.32.0
         with:
           scan-type: 'image'
           image-ref: 'my-app-scan:${{ github.sha }}-${{ matrix.arch }}'
