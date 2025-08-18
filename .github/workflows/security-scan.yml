@@ -14,7 +14,7 @@ permissions:
   contents: write      
   security-events: write
   pull-requests: write
-
+  
 jobs:
   scan-fs:
     name: Scan Go Dependencies (FS)
@@ -31,29 +31,32 @@ jobs:
 
       - name: Download Go modules
         run: go mod download
-        
+
       - name: 🛑 Scan for vulnerabilities (Blocker)
         id: scan_blocker
         uses: aquasecurity/trivy-action@0.32.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
+          skip-dirs: 'examples' # Skips the examples folder
           format: 'sarif'
           output: 'trivy-results.sarif'
           severity: 'CRITICAL,HIGH'
           exit-code: 1
           ignore-unfixed: true
         continue-on-error: true
+
       - name: Generate report for PR comment
         if: steps.scan_blocker.outcome == 'failure'
         uses: aquasecurity/trivy-action@0.32.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
+          skip-dirs: 'examples' # Skips the examples folder
           format: 'table'
           output: 'trivy-comment-report.txt'
           severity: 'CRITICAL,HIGH'
-          exit-code: 0 
+          exit-code: 0
           ignore-unfixed: true
           
       - name: Post vulnerability report on PR
@@ -62,14 +65,15 @@ jobs:
         with:
           issue-number: ${{ github.event.pull_request.number }}
           body-file: trivy-comment-report.txt
-   
           edit-mode: replace
+
       - name: ✅ Scan and submit to GitHub Dependency Graph
         if: always()
         uses: aquasecurity/trivy-action@0.32.0
         with:
           scan-type: 'fs'
           scan-ref: '.'
+          skip-dirs: 'examples' # Skips the examples folder
           format: 'github'
           exit-code: 0
 
