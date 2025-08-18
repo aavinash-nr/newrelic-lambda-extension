@@ -41,9 +41,8 @@ jobs:
         with:
           scan-type: fs
           scan-ref: .
-          vuln-type: library
+          vuln-type: library,os
           list-all-pkgs: true
-          dependency-tree: true
           format: sarif
           output: trivy-fs.sarif
           severity: CRITICAL,HIGH
@@ -57,7 +56,7 @@ jobs:
         with:
           scan-type: fs
           scan-ref: .
-          vuln-type: library
+          vuln-type: library,os
           list-all-pkgs: true
           dependency-tree: true
           format: table
@@ -107,7 +106,6 @@ jobs:
           image-ref: my-app-scan:${{ github.sha }}-${{ matrix.arch }}
           vuln-type: os,library
           list-all-pkgs: true
-          dependency-tree: true
           format: sarif
           output: trivy-image-${{ matrix.arch }}.sarif
           severity: CRITICAL,HIGH
