@@ -11,7 +11,7 @@ on:
       - dev
 
 permissions:
-  contents: write   
+  contents: write    
   security-events: write
   pull-requests: write
 
@@ -32,6 +32,8 @@ jobs:
       - name: Download Go modules
         run: go mod download
 
+      # This is the primary scan for your Go module vulnerabilities.
+      # The `trivy-db-repository` flag ensures it downloads the latest vulnerability database.
       - name: 🛑 Scan for vulnerabilities (Blocker)
         id: scan_blocker
         uses: aquasecurity/trivy-action@0.32.0
@@ -44,7 +46,9 @@ jobs:
           severity: 'CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN'
           exit-code: 1
           ignore-unfixed: false
-        continue-on-error: true
+          # ADD THIS LINE to force a fresh DB download
+          trivy-db-repository: 'ghcr.io/aquasecurity/trivy-db'
+          continue-on-error: true
 
       - name: Generate report for PR comment
         if: steps.scan_blocker.outcome == 'failure'
@@ -108,6 +112,8 @@ jobs:
             --platform linux/${{ matrix.arch }} \
             -t my-app-scan:${{ github.sha }}-${{ matrix.arch }} .
 
+      # This scan checks the final image, including the Go standard library version.
+      # The `trivy-db-repository` flag ensures it downloads the latest vulnerability database.
       - name: 🛑 Scan image for vulnerabilities (Blocker)
         id: image_scan_blocker
         uses: aquasecurity/trivy-action@0.32.0
@@ -119,7 +125,9 @@ jobs:
           severity: 'CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN'
           exit-code: 1
           ignore-unfixed: false
-        continue-on-error: true
+          # ADD THIS LINE to force a fresh DB download
+          trivy-db-repository: 'ghcr.io/aquasecurity/trivy-db'
+          continue-on-error: true
 
       - name: Generate report for PR comment
         if: steps.image_scan_blocker.outcome == 'failure'
@@ -138,7 +146,7 @@ jobs:
         uses: peter-evans/create-or-update-comment@v4
         with:
           issue-number: ${{ github.event.pull_request.number }}
-          body-file: trivy-image-comment-report.txt
+          body-file: 'trivy-image-comment-report.txt'
           edit-mode: replace
           unique-id-for-comment: image-scan-${{ matrix.arch }}
           
