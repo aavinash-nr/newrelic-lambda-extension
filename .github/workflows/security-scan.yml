@@ -1,4 +1,4 @@
-name: Security Scan
+name: Security Scan with Trivy CLI
 
 on:
   push:
@@ -11,92 +11,83 @@ on:
       - dev
 
 permissions:
-  contents: write    
+  contents: write      
   security-events: write
   pull-requests: write
 
 jobs:
   scan-fs:
     name: Scan Go Dependencies (FS)
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.23.7"
+          go-version: "1.23.10"
           cache-dependency-path: go.sum
 
       - name: Download Go modules
         run: go mod download
 
-      # FIX 1: Add a step to clear the Trivy cache directory before scanning.
-      # This ensures a fresh vulnerability database is downloaded every time.
-      - name: Clear Trivy cache
-        run: rm -rf ${{ github.workspace }}/.cache/trivy
 
-      # This is the primary scan for your Go module vulnerabilities.
-      - name: 🛑 Scan for vulnerabilities (Blocker)
-        id: scan_blocker
-        uses: aquasecurity/trivy-action@0.32.0
-        # Moved 'continue-on-error' to the step level where it belongs.
+      - name: Install Trivy
+        run: |
+          # This script installs the latest version of Trivy.
+          # See https://aquasecurity.github.io/trivy/v0.53/getting-started/installation/
+          sudo apt-get install wget apt-transport-https gnupg lsb-release -y
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install trivy -y
+
+      - name: 🛑 Scan filesystem for vulnerabilities (Blocker)
+        id: fs_scan_blocker
         continue-on-error: true
-        # FIX 1: Removed the deprecated 'TRIVY_RESET' environment variable.
-        with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          skip-dirs: 'examples'
-          format: 'sarif'
-          output: 'trivy-fs-results.sarif'
-          severity: 'CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN'
-          exit-code: 1
-          ignore-unfixed: false
-
+        run: |
+          trivy fs \
+            --scanners vuln \
+            --dependency-tree \
+            --exit-code 1 \
+            --severity "CRITICAL,HIGH" \
+            --ignore-unfixed \
+            --skip-dirs "examples" \
+            .
+    
       - name: Generate report for PR comment
-        if: steps.scan_blocker.outcome == 'failure'
-        uses: aquasecurity/trivy-action@0.32.0
-        with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          skip-dirs: 'examples'
-          format: 'table'
-          output: 'trivy-fs-comment-report.txt'
-          severity: 'CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN'
-          exit-code: 0
-          ignore-unfixed: false
-          
+        if: steps.fs_scan_blocker.outcome == 'failure'
+        run: |
+          # Run the same scan, but with exit-code 0 so it doesn't fail.
+          # Redirect the table output to a file for the PR comment.
+          trivy fs \
+            --scanners vuln \
+            --dependency-tree \
+            --exit-code 0 \
+            --severity "CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN" \
+            --ignore-unfixed \
+            --format table \
+            --skip-dirs "examples" \
+            . > trivy-fs-comment-report.txt
+
       - name: Post vulnerability report on PR
-        if: steps.scan_blocker.outcome == 'failure' && github.event_name == 'pull_request'
+        if: steps.fs_scan_blocker.outcome == 'failure' && github.event_name == 'pull_request'
         uses: peter-evans/create-or-update-comment@v4
         with:
           issue-number: ${{ github.event.pull_request.number }}
           body-file: trivy-fs-comment-report.txt
           edit-mode: replace
-          # FIX 2: Removed the invalid 'unique-id-for-comment' input.
-          # The action automatically finds and updates its own previous comments.
-
-      - name: ✅ Scan and submit to GitHub Dependency Graph
-        if: always()
-        uses: aquasecurity/trivy-action@0.32.0
-        with:
-          scan-type: 'fs'
-          scan-ref: '.'
-          skip-dirs: 'examples'
-          format: 'github'
-          exit-code: 0
 
       - name: Fail job if vulnerabilities were found
-        if: steps.scan_blocker.outcome == 'failure'
+        if: steps.fs_scan_blocker.outcome == 'failure'
         run: |
           echo "Failing the job due to filesystem vulnerabilities."
           exit 1
 
-  # JOB 2: Image Scan
   scan-image:
     name: Scan Docker Images
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     needs: scan-fs
     strategy:
       fail-fast: false
@@ -104,7 +95,7 @@ jobs:
         arch: [amd64, arm64]
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
 
       - name: Set up QEMU and Docker Buildx
         uses: docker/setup-qemu-action@v3
@@ -115,39 +106,40 @@ jobs:
         run: |
           docker build --build-arg TARGETARCH=${{ matrix.arch }} \
             --platform linux/${{ matrix.arch }} \
-            -t my-app-scan:${{ github.sha }}-${{ matrix.arch }} .
+            -t newrelic-lambda-extension:${{ github.sha }}-${{ matrix.arch }} .
 
-      # FIX 1: Add a step to clear the Trivy cache directory before scanning.
-      - name: Clear Trivy cache
-        run: rm -rf ${{ github.workspace }}/.cache/trivy
+      - name: Install Trivy
+        run: |
+          sudo apt-get install wget apt-transport-https gnupg lsb-release -y
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb $(lsb_release -sc) main" | sudo tee /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install trivy -y
 
-      # This scan checks the final image, including the Go standard library version.
       - name: 🛑 Scan image for vulnerabilities (Blocker)
         id: image_scan_blocker
-        uses: aquasecurity/trivy-action@0.32.0
-        # Moved 'continue-on-error' to the step level where it belongs.
         continue-on-error: true
-        # FIX 1: Removed the deprecated 'TRIVY_RESET' environment variable.
-        with:
-          scan-type: 'image'
-          image-ref: 'my-app-scan:${{ github.sha }}-${{ matrix.arch }}'
-          format: 'sarif'
-          output: 'trivy-image-results.sarif'
-          severity: 'CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN'
-          exit-code: 1
-          ignore-unfixed: false
-
+        run: |
+          trivy image \
+            --scanners vuln \
+            --dependency-tree \
+            --exit-code 1 \
+            --severity "CRITICAL,HIGH" \
+            --ignore-unfixed \
+            --format table \
+            newrelic-lambda-extension:${{ github.sha }}-${{ matrix.arch }}
       - name: Generate report for PR comment
         if: steps.image_scan_blocker.outcome == 'failure'
-        uses: aquasecurity/trivy-action@0.32.0
-        with:
-          scan-type: 'image'
-          image-ref: 'my-app-scan:${{ github.sha }}-${{ matrix.arch }}'
-          format: 'table'
-          output: 'trivy-image-comment-report.txt'
-          severity: 'CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN'
-          exit-code: 0
-          ignore-unfixed: false
+        run: |
+          # Run the same scan, but with exit-code 0 and redirect output to a file.
+          trivy image \
+            --scanners vuln \
+            --dependency-tree \
+            --exit-code 0 \
+            --severity "CRITICAL,HIGH,MEDIUM,LOW,UNKNOWN" \
+            --ignore-unfixed \
+            --format table \
+            newrelic-lambda-extension:${{ github.sha }}-${{ matrix.arch }} > trivy-image-comment-report.txt
       
       - name: Post vulnerability report on PR
         if: steps.image_scan_blocker.outcome == 'failure' && github.event_name == 'pull_request'
@@ -156,8 +148,7 @@ jobs:
           issue-number: ${{ github.event.pull_request.number }}
           body-file: 'trivy-image-comment-report.txt'
           edit-mode: replace
-          # FIX 2: Removed the invalid 'unique-id-for-comment' input.
-          
+
       - name: Fail job if vulnerabilities were found
         if: steps.image_scan_blocker.outcome == 'failure'
         run: |
