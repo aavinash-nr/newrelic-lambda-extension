@@ -41,6 +41,7 @@ jobs:
           curl -X POST \
             -H "Content-Type: application/json" \
             -H "x-api-key: $API_KEY" \
+            -H "X-Amz-Invocation-Type: Event" \
             --data '{ "x86_layer_arn": "${{ needs.publish-layers.outputs.x86_arn }}", "arm_layer_arn": "${{ needs.publish-layers.outputs.arm_arn }}", "execution_phase": "cold" }' \
             $API_URL
 
@@ -57,5 +58,6 @@ jobs:
           curl -X POST \
             -H "Content-Type: application/json" \
             -H "x-api-key: $API_KEY" \
+            -H "X-Amz-Invocation-Type: Event" \
             --data '{ "x86_layer_arn": "${{ needs.publish-layers.outputs.x86_arn }}", "arm_layer_arn": "${{ needs.publish-layers.outputs.arm_arn }}", "execution_phase": "warm" }' \
             $API_URL
