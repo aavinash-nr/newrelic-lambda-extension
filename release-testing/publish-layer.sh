@@ -2,11 +2,10 @@
 set -Eeuo pipefail
 
 EXTENSION_VERSION="2.3.23"
-PRIMARY_REGION="us-west-1" 
+PRIMARY_REGION="us-west-1"
 REGIONS=(
   us-west-1
 )
-
 
 hash_file() {
   if command -v md5sum &>/dev/null; then
@@ -90,7 +89,7 @@ build_and_publish_for_arch() {
   echo "Processing architecture: ${arch}" >&2
   
   echo "Building layer zip file with 'make ${make_target}'..." >&2
-  make "${make_target}"
+  make --silent "${make_target}"
 
   echo "Publishing ${arch} layer to all regions from ${zip_file}..." >&2
   for region in "${REGIONS[@]}"; do
