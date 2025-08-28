@@ -37,6 +37,7 @@ jobs:
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          EXTENSION_VERSION: ${{ steps.version_step.outputs.version }}
         run: ./release-testing/publish-layer.sh
 
   invoke-lambda:
@@ -47,7 +48,6 @@ jobs:
         env:
           API_URL: ${{ secrets.API_GATEWAY_URL }}
           API_KEY: ${{ secrets.API_GATEWAY_KEY }}
-          EXTENSION_VERSION: ${{ steps.version_step.outputs.version }}
         run: |
           echo "Invoking Lambda with x86 ARN: ${{ needs.publish-layers.outputs.x86_arn }}"
           echo "Invoking Lambda with ARM ARN: ${{ needs.publish-layers.outputs.arm_arn }}"
@@ -65,7 +65,6 @@ jobs:
         env:
           API_URL: ${{ secrets.API_GATEWAY_URL }}
           API_KEY: ${{ secrets.API_GATEWAY_KEY }}
-          EXTENSION_VERSION: ${{ steps.version_step.outputs.version }}
         run: |
           echo "Invoking Lambda with x86 ARN: ${{ needs.publish-layers.outputs.x86_arn }}"
           echo "Invoking Lambda with ARM ARN: ${{ needs.publish-layers.outputs.arm_arn }}"
