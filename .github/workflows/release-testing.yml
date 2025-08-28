@@ -2,6 +2,11 @@ name: Publish Lambda Layer
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - master 
+    paths:
+      - 'util/extension.go'
 
 jobs:
   publish-layers:
@@ -12,6 +17,13 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+      - name: Extract Extension Version
+        id: version_step
+        run: |
+          # This command finds the correct line, splits it by the quote marks, and gets the version.
+          # IMPORTANT: Update 'util/extension.go' to the correct path to your file.
+          VERSION=$(grep 'Version =' util/extension.go | awk -F'"' '{print $2}')
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
@@ -35,6 +47,7 @@ jobs:
         env:
           API_URL: ${{ secrets.API_GATEWAY_URL }}
           API_KEY: ${{ secrets.API_GATEWAY_KEY }}
+          EXTENSION_VERSION: ${{ steps.version_step.outputs.version }}
         run: |
           echo "Invoking Lambda with x86 ARN: ${{ needs.publish-layers.outputs.x86_arn }}"
           echo "Invoking Lambda with ARM ARN: ${{ needs.publish-layers.outputs.arm_arn }}"
@@ -52,6 +65,7 @@ jobs:
         env:
           API_URL: ${{ secrets.API_GATEWAY_URL }}
           API_KEY: ${{ secrets.API_GATEWAY_KEY }}
+          EXTENSION_VERSION: ${{ steps.version_step.outputs.version }}
         run: |
           echo "Invoking Lambda with x86 ARN: ${{ needs.publish-layers.outputs.x86_arn }}"
           echo "Invoking Lambda with ARM ARN: ${{ needs.publish-layers.outputs.arm_arn }}"
