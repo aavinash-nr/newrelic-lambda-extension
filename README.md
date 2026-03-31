@@ -7,6 +7,10 @@ An AWS Lambda extension to collect, enhance, and transport telemetry data from y
 This lightweight AWS Lambda Extension runs alongside your AWS Lambda functions and automatically handles the collection and transport of telemetry data from
 supported New Relic serverless agents. The extension requires a telemetry payload from a New Relic agent. Conditions that delay or prevent that payload from being written may result in longer-than-expected invocation durations.
 
+## ⚠️ Notice
+
+This extension has been **converted to a Rust extension**. The Rust extension is now **private** and not publicly available in this repository.
+
 ## Installation
 
 To install the extension, simply include the layer with your instrumented
@@ -105,6 +109,25 @@ The New Relic Lambda Extension offers various features, which can be utilised by
 | `NEW_RELIC_LICENSE_KEY_SECRET` | | Secret Name or ARN | Specify the name or ARN of the secret from **AWS Secrets Manager** that contains your New Relic license key.<br><br>**Notes:**<br>- This is only used if `NEW_RELIC_LICENSE_KEY` is not set.<br>- The secret must be in the same AWS region as your Lambda function.<br>- Your Lambda function's execution role needs the `secretsmanager:GetSecretValue` permission for this secret. |
 | `NEW_RELIC_LICENSE_KEY_SSM_PARAMETER_NAME` | | Parameter Name or ARN | Specify the name or ARN of the parameter from the **AWS Systems Manager Parameter Store** that contains your New Relic license key.<br><br>**Notes:**<br> - This is only used if `NEW_RELIC_LICENSE_KEY` is not set.<br> - The SSM parameter must be in the same AWS region as your Lambda function.<br> - Your Lambda function's execution role needs the `ssm:GetParameter` permission for this parameter. |
 | `NEW_RELIC_CLOUD_AWS_ACCOUNT_ID` | | AWS Account ID | Provide the AWS Account ID where your monitored resources (e.g., databases, Lambda functions) are located. This allows New Relic to correctly map and display relationships between these monitored entities. |
+
+### Network / Proxy Configuration
+
+| Environment variable | Default value | Options | Description |
+|--------|-----------|-------------|-------------|
+| `NEW_RELIC_LAMBDA_EXTENSION_PROXY` | | URL | HTTP proxy for the extension's outbound traffic to New Relic. Only affects the extension — does not interfere with your Lambda function's own traffic. Supports `http://`, `https://`, and `socks5://` schemes. Credentials are supported via `http://user:pass@proxy:port` format and are masked in all log output. Localhost traffic (Lambda Extensions API) is never proxied. When not set, the extension respects standard `HTTPS_PROXY`/`HTTP_PROXY` environment variables as a fallback. |
+
+**When to use `NEW_RELIC_LAMBDA_EXTENSION_PROXY`:**
+
+If your Lambda runs in a VPC with no direct internet access and routes outbound traffic through an HTTP proxy, set this variable to route only the extension's traffic through the proxy. This avoids using the process-wide `HTTPS_PROXY` variable, which would also affect your application's own HTTP traffic.
+
+```sh
+# Example: route extension traffic through a VPC proxy
+NEW_RELIC_LAMBDA_EXTENSION_PROXY=http://proxy.internal:3128
+
+# Example: with authentication
+NEW_RELIC_LAMBDA_EXTENSION_PROXY=http://user:pass@proxy.internal:3128
+```
+
 
 ## Testing
 
